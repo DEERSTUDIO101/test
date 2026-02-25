@@ -4745,24 +4745,24 @@ local function StartAutoHealth()
                 
                 if not (getgenv().NoDesiredRocksAvailable and healthPercent > 25) then
                     if healthPercent <= getgenv().HealthPotionThreshold then
-                        if not Helpers.IsAnyHealthPotionActive() then
-                            local bestPotion = Helpers.GetBestHealthPotion()
-                        
-                            if not bestPotion and getgenv().AutoBuyHealthPotion and Helpers.AreAllHealthPotionsEmpty() then
-                                local potionsToBuy = {}
-                                for _, potionName in ipairs(selectedHealthPotions) do
-                                    table.insert(potionsToBuy, potionName)
-                                end
-                                if #potionsToBuy > 0 then
-                                    BuyMultiplePotionsWithFly(potionsToBuy, 10)
-                                    task.wait(0.5)
-                                    bestPotion = Helpers.GetBestHealthPotion()
-                                end
+                        local bestPotion = Helpers.GetBestHealthPotion()
+
+                        -- Keep buying independent from effect checks so bypassed/stale effect states
+                        -- cannot block potion restock logic.
+                        if not bestPotion and getgenv().AutoBuyHealthPotion and Helpers.AreAllHealthPotionsEmpty() then
+                            local potionsToBuy = {}
+                            for _, potionName in ipairs(selectedHealthPotions) do
+                                table.insert(potionsToBuy, potionName)
                             end
-                        
-                            if bestPotion then
-                                DrinkPotion(bestPotion)
+                            if #potionsToBuy > 0 then
+                                BuyMultiplePotionsWithFly(potionsToBuy, 10)
+                                task.wait(0.5)
+                                bestPotion = Helpers.GetBestHealthPotion()
                             end
+                        end
+
+                        if bestPotion and not Helpers.IsAnyHealthPotionActive() then
+                            DrinkPotion(bestPotion)
                         end
                     end
                 end
@@ -4843,18 +4843,16 @@ local function StartAutoDrink()
             else
                 if #selectedDrinkPotions > 0 then
                     for _, potionName in ipairs(selectedDrinkPotions) do
-                        if not Helpers.IsPotionEffectActive(potionName) then
-                            local count = Helpers.GetPotionCount(potionName)
+                        local count = Helpers.GetPotionCount(potionName)
 
-                            if count <= 0 and getgenv().AutoBuyWhenEmpty then
-                                BuyPotionWithFly(potionName, 10)
-                                task.wait(0.5)
-                                count = Helpers.GetPotionCount(potionName)
-                            end
+                        if count <= 0 and getgenv().AutoBuyWhenEmpty then
+                            BuyPotionWithFly(potionName, 10)
+                            task.wait(0.5)
+                            count = Helpers.GetPotionCount(potionName)
+                        end
 
-                            if count > 0 then
-                                DrinkPotion(potionName)
-                            end
+                        if count > 0 and not Helpers.IsPotionEffectActive(potionName) then
+                            DrinkPotion(potionName)
                         end
                     end
                 end
