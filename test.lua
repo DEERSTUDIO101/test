@@ -2991,7 +2991,7 @@ BossesTab:Toggle({
 
                 local cache = {}
 
-                --// Kill logic (unchanged)
+                --// Kill logic tuned for executors where direct humanoid writes don't replicate.
                 local function TryKill(mob)
                     if not mob then return end
                     local root = mob:FindFirstChild("HumanoidRootPart")
@@ -3009,14 +3009,33 @@ BossesTab:Toggle({
                             hrp = Client.Character and Client.Character:FindFirstChild("HumanoidRootPart")
                         end
 
-                        for i = 1, 15 do
+                        local destroyY = tonumber(Workspace.FallenPartsDestroyHeight) or -500
+                        destroyY = destroyY - 35
+
+                        for i = 1, 40 do
                             if not mob or not mob.Parent or hum.Health <= 0 then break end
-                            pcall(root.SetNetworkOwner, root, Client)
-                            hum.Health = 0
+
+                            -- Repeatedly push boss into kill zone/void as replication-safe fallback.
+                            pcall(function()
+                                if i % 2 == 1 then
+                                    TeleportGolemToKillZone(mob)
+                                else
+                                    root.CFrame = CFrame.new(root.Position.X, destroyY, root.Position.Z)
+                                end
+                            end)
+                            pcall(function()
+                                root.AssemblyLinearVelocity = Vector3.zero
+                                root.AssemblyAngularVelocity = Vector3.zero
+                            end)
+                            pcall(function()
+                                if BossController and BossController.attackRemote then
+                                    BossController.attackRemote:InvokeServer("Weapon")
+                                end
+                            end)
                             RunService.Heartbeat:Wait()
                         end
 
-                        task.wait(0.2)
+                        task.wait(0.3)
                         if mob and mob.Parent and hum.Health > 0 then
                             cache[mob] = nil
                         end
@@ -3031,7 +3050,8 @@ BossesTab:Toggle({
                 --// MAIN LOOP
                 while getgenv().InstantKillBoss and BossController.isKilling do
                     for _, v in ipairs(Mobs:GetChildren()) do
-                        if v.Name:match("^" .. (getgenv().SelectedBoss or "Golem")) and not cache[v] then
+                        local baseName = v.Name:gsub("%d+$", "")
+                        if v:IsA("Model") and baseName == GetSelectedBossName() and not cache[v] then
                             local hum = v:FindFirstChild("Humanoid")
                             if hum and hum.Health > 0 and hum.Health <= 19000 then
                                 cache[v] = true
@@ -3369,9 +3389,10 @@ local function StartAutoQuest(toggleElement)
                         getgenv().AutoMob = true
                         getgenv().NoClipEnabled = true
                     end
-                elseif getgenv().QuestKillFallback == "Kill Anything" then
-                                        if getgenv().AllowQuestAutoEnable and not getgenv().AutoMob then
-                        getgenv().SelectedMobs = MobList                         getgenv().AutoMob = true
+                    elseif getgenv().QuestKillFallback == "Kill Anything" then
+                        if getgenv().AllowQuestAutoEnable and not getgenv().AutoMob then
+                        getgenv().SelectedMobs = MobList
+                        getgenv().AutoMob = true
                         getgenv().NoClipEnabled = true
                         WindUI:Notify({
                             Title = "Quest Fallback",
