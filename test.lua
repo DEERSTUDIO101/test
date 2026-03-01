@@ -216,6 +216,24 @@ local PotionData = {
     Health = {"HealthPotion3", "HealthPotion2", "HealthPotion1", "HealthPotion12"},
     Buff = {"AttackDamagePotion1", "LuckPotion1", "MinerPotion1", "MovementSpeedPotion1", "PotionLVL2"},
     All = {"AttackDamagePotion1", "HealthPotion1", "HealthPotion2", "HealthPotion3", "HealthPotion12", "LuckPotion1", "MinerPotion1", "MovementSpeedPotion1", "PotionLVL2"},
+    ByMap = {
+        [1] = {
+            Health = {"HealthPotion1", "HealthPotion12"},
+            Buff = {"LuckPotion1", "MinerPotion1", "MovementSpeedPotion1", "AttackDamagePotion1"}
+        },
+        [2] = {
+            Health = {"HealthPotion2"},
+            Buff = {"LuckPotion1", "MinerPotion1", "MovementSpeedPotion1", "AttackDamagePotion1"}
+        },
+        [3] = {
+            Health = {"HealthPotion3"},
+            Buff = {"LuckPotion1", "MinerPotion1", "MovementSpeedPotion1", "AttackDamagePotion1", "PotionLVL2"}
+        },
+        [4] = {
+            Health = {"HealthPotion3"},
+            Buff = {"MinerPotion1", "MovementSpeedPotion1", "AttackDamagePotion1"}
+        }
+    }
 }
 
 local Threads = {
@@ -235,6 +253,86 @@ local Helpers = {}
 Helpers.SafeRequire = function(path)
     local success, result = pcall(function() return require(path) end)
     return success and result or nil
+end
+
+Helpers.GetAvailablePotions = function()
+    local mapNum = GetCurrentMapNumber()
+    local mapData = PotionData.ByMap[mapNum]
+    
+    local available = {}
+    local seen = {}
+    
+    -- Strategy 1: Map-based definition (primary)
+    if mapData then
+        for _, list in pairs({mapData.Health, mapData.Buff}) do
+            for _, name in ipairs(list) do
+                if not seen[name] then
+                    table.insert(available, name)
+                    seen[name] = true
+                end
+            end
+        end
+    end
+    
+    -- Strategy 2: Workspace scan (fallback/addition)
+    local proximity = workspace:FindFirstChild("Proximity")
+    if proximity then
+        for _, folder in ipairs(proximity:GetChildren()) do
+            local prompt = folder:FindFirstChildOfClass("ProximityPrompt", true)
+            if prompt and not seen[folder.Name] then
+                -- Only add if it looks like a potion
+                if string.find(folder.Name, "Potion") then
+                    table.insert(available, folder.Name)
+                    seen[folder.Name] = true
+                end
+            end
+        end
+    end
+    
+    -- Final fallback: Use all if somehow empty
+    if #available == 0 then
+        return PotionData.All
+    end
+    
+    return available
+end
+
+Helpers.GetAvailableHealthPotions = function()
+    local mapNum = GetCurrentMapNumber()
+    local mapData = PotionData.ByMap[mapNum]
+    
+    if mapData and mapData.Health then
+        return mapData.Health
+    end
+    
+    -- Fallback: Filter from GetAvailablePotions
+    local allAvailable = Helpers.GetAvailablePotions()
+    local health = {}
+    for _, name in ipairs(allAvailable) do
+        if table.find(PotionData.Health, name) then
+            table.insert(health, name)
+        end
+    end
+    return #health > 0 and health or PotionData.Health
+end
+
+Helpers.GetAvailableBuffPotions = function()
+    local mapNum = GetCurrentMapNumber()
+    local mapData = PotionData.ByMap[mapNum]
+    
+    if mapData and mapData.Buff then
+        return mapData.Buff
+    end
+    
+    -- Fallback: Filter from GetAvailablePotions
+    local allAvailable = Helpers.GetAvailablePotions()
+    local buff = {}
+    for _, name in ipairs(allAvailable) do
+        if table.find(PotionData.Buff, name) then
+            table.insert(buff, name)
+        end
+    end
+    return #buff > 0 and buff or PotionData.Buff
 end
 
 local EffectBypassState = {
@@ -4311,6 +4409,7 @@ Helpers.GetPotionCount = function(potionName)
 end
 
 Helpers.MAP3_POTION_SHOP_POS = Vector3.new(146.108765, 17.4276791, 48.4276199)
+Helpers.MAP4_POTION_SHOP_POS = Vector3.new(57, 21, -441)
 
 Helpers.GetPotionShopHandle = function()
     local proximity = workspace:FindFirstChild("Proximity")
@@ -4318,49 +4417,22 @@ Helpers.GetPotionShopHandle = function()
         return nil
     end
 
-    local function GetPotionAnchorPart(obj)
-        if not obj then
-            return nil
-        end
-
-        local handle = obj:FindFirstChild("Handle", true)
-        if handle and handle:IsA("BasePart") then
-            return handle
-        end
-
-        if obj:IsA("Model") then
-            if obj.PrimaryPart and obj.PrimaryPart:IsA("BasePart") then
-                return obj.PrimaryPart
-            end
-            local basePart = obj:FindFirstChildWhichIsA("BasePart", true)
-            if basePart then
-                return basePart
-            end
-        end
-
-        if obj:IsA("BasePart") then
-            return obj
-        end
-
-        return nil
-    end
-
-    local preferred = PotionData.All or {}
+    local preferred = {"MinerPotion1", "HealthPotion1", "HealthPotion2", "HealthPotion3", "HealthPotion12"}
     for _, name in ipairs(preferred) do
         local obj = proximity:FindFirstChild(name)
         if obj then
-            local anchor = GetPotionAnchorPart(obj)
-            if anchor then
-                return anchor
+            local handle = obj:FindFirstChild("Handle") or (obj:IsA("BasePart") and obj or nil)
+            if handle and handle:IsA("BasePart") then
+                return handle
             end
         end
     end
 
     for _, obj in ipairs(proximity:GetChildren()) do
         if string.find(string.lower(obj.Name), "potion", 1, true) then
-            local anchor = GetPotionAnchorPart(obj)
-            if anchor then
-                return anchor
+            local handle = obj:FindFirstChild("Handle") or (obj:IsA("BasePart") and obj or nil)
+            if handle and handle:IsA("BasePart") then
+                return handle
             end
         end
     end
@@ -4413,6 +4485,8 @@ local function FlyToPotionShop()
         targetPos = shopHandle.Position + Vector3.new(0, 2, 0)
     elseif currentPlaceId == getgenv().MAP_PLACE_IDS[3] then
         targetPos = Helpers.MAP3_POTION_SHOP_POS
+    elseif currentPlaceId == getgenv().MAP_PLACE_IDS[4] then
+        targetPos = Helpers.MAP4_POTION_SHOP_POS
     else
         warn("[Potions] No potion shop handle found in workspace.Proximity")
         return false
@@ -4611,7 +4685,7 @@ PotionsTab:Dropdown({
     AllowNone = true,
     Value = {},
     Flag = "PotionsToBuy",
-    Values = PotionData.All,
+    Values = Helpers.GetAvailablePotions(),
     Callback = function(values)
         PotionBuyState.selected = Helpers.SelectionToArray(values, PotionData.All)
     end
@@ -4670,14 +4744,14 @@ PotionsTab:Button({
 PotionsTab:Section({ Title = "Auto Health Potions" })
 
 Helpers.IsAnyHealthPotionActive = function()
-    for _, potionName in ipairs(PotionData.Health) do
+    for _, potionName in ipairs(Helpers.GetAvailableHealthPotions()) do
         if Helpers.IsPotionEffectActive(potionName) then return true end
     end
     return false
 end
 
 Helpers.GetBestHealthPotion = function()
-    for _, potionName in ipairs(PotionData.Health) do
+    for _, potionName in ipairs(Helpers.GetAvailableHealthPotions()) do
         if Helpers.IsSelected(potionName, getgenv().SelectedHealthPotions) and Helpers.GetPotionCount(potionName) > 0 then
             return potionName
         end
@@ -4686,7 +4760,7 @@ Helpers.GetBestHealthPotion = function()
 end
 
 Helpers.AreAllHealthPotionsEmpty = function()
-    local selectedHealthPotions = Helpers.SelectionToArray(getgenv().SelectedHealthPotions, PotionData.Health)
+    local selectedHealthPotions = Helpers.SelectionToArray(getgenv().SelectedHealthPotions, Helpers.GetAvailableHealthPotions())
     for _, potionName in ipairs(selectedHealthPotions) do
         if Helpers.GetPotionCount(potionName) > 0 then return false end
     end
@@ -4700,7 +4774,7 @@ PotionsTab:Dropdown({
     AllowNone = true,
     Value = {},
     Flag = "HealthPotionsToUse",
-    Values = PotionData.Health,
+    Values = Helpers.GetAvailableHealthPotions(),
     Callback = function(values)
         getgenv().SelectedHealthPotions = Helpers.SelectionToArray(values, PotionData.Health)
     end
@@ -4736,7 +4810,7 @@ local function StartAutoHealth()
     
     Threads.autoHealth = task.spawn(function()
         while getgenv().AutoHealthPotion do
-            local selectedHealthPotions = Helpers.SelectionToArray(getgenv().SelectedHealthPotions, PotionData.Health)
+            local selectedHealthPotions = Helpers.SelectionToArray(getgenv().SelectedHealthPotions, Helpers.GetAvailableHealthPotions())
             local character = LocalPlayer.Character
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
             
@@ -4745,24 +4819,24 @@ local function StartAutoHealth()
                 
                 if not (getgenv().NoDesiredRocksAvailable and healthPercent > 25) then
                     if healthPercent <= getgenv().HealthPotionThreshold then
-                        local bestPotion = Helpers.GetBestHealthPotion()
-
-                        -- Keep buying independent from effect checks so bypassed/stale effect states
-                        -- cannot block potion restock logic.
-                        if not bestPotion and getgenv().AutoBuyHealthPotion and Helpers.AreAllHealthPotionsEmpty() then
-                            local potionsToBuy = {}
-                            for _, potionName in ipairs(selectedHealthPotions) do
-                                table.insert(potionsToBuy, potionName)
+                        if not Helpers.IsAnyHealthPotionActive() then
+                            local bestPotion = Helpers.GetBestHealthPotion()
+                        
+                            if not bestPotion and getgenv().AutoBuyHealthPotion and Helpers.AreAllHealthPotionsEmpty() then
+                                local potionsToBuy = {}
+                                for _, potionName in ipairs(selectedHealthPotions) do
+                                    table.insert(potionsToBuy, potionName)
+                                end
+                                if #potionsToBuy > 0 then
+                                    BuyMultiplePotionsWithFly(potionsToBuy, 10)
+                                    task.wait(0.5)
+                                    bestPotion = Helpers.GetBestHealthPotion()
+                                end
                             end
-                            if #potionsToBuy > 0 then
-                                BuyMultiplePotionsWithFly(potionsToBuy, 10)
-                                task.wait(0.5)
-                                bestPotion = Helpers.GetBestHealthPotion()
+                        
+                            if bestPotion then
+                                DrinkPotion(bestPotion)
                             end
-                        end
-
-                        if bestPotion and not Helpers.IsAnyHealthPotionActive() then
-                            DrinkPotion(bestPotion)
                         end
                     end
                 end
@@ -4816,7 +4890,7 @@ PotionsTab:Dropdown({
     AllowNone = true,
     Value = {},
     Flag = "PotionsToAutoDrink",
-    Values = PotionData.Buff,
+    Values = Helpers.GetAvailableBuffPotions(),
     Callback = function(values)
         getgenv().SelectedDrinkPotions = Helpers.SelectionToArray(values, PotionData.Buff)
     end
@@ -4837,22 +4911,24 @@ local function StartAutoDrink()
     
     Threads.autoDrink = task.spawn(function()
         while getgenv().AutoDrinkPotions do
-            local selectedDrinkPotions = Helpers.SelectionToArray(getgenv().SelectedDrinkPotions, PotionData.Buff)
+            local selectedDrinkPotions = Helpers.SelectionToArray(getgenv().SelectedDrinkPotions, Helpers.GetAvailableBuffPotions())
             if getgenv().NoDesiredRocksAvailable then
                 task.wait(1)
             else
                 if #selectedDrinkPotions > 0 then
                     for _, potionName in ipairs(selectedDrinkPotions) do
-                        local count = Helpers.GetPotionCount(potionName)
+                        if not Helpers.IsPotionEffectActive(potionName) then
+                            local count = Helpers.GetPotionCount(potionName)
 
-                        if count <= 0 and getgenv().AutoBuyWhenEmpty then
-                            BuyPotionWithFly(potionName, 10)
-                            task.wait(0.5)
-                            count = Helpers.GetPotionCount(potionName)
-                        end
+                            if count <= 0 and getgenv().AutoBuyWhenEmpty then
+                                BuyPotionWithFly(potionName, 10)
+                                task.wait(0.5)
+                                count = Helpers.GetPotionCount(potionName)
+                            end
 
-                        if count > 0 and not Helpers.IsPotionEffectActive(potionName) then
-                            DrinkPotion(potionName)
+                            if count > 0 then
+                                DrinkPotion(potionName)
+                            end
                         end
                     end
                 end
